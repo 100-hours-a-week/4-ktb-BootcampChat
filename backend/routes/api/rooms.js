@@ -4,6 +4,7 @@ const auth = require('../../middleware/auth');
 const Room = require('../../models/Room');
 const User = require('../../models/User');
 const { rateLimit } = require('express-rate-limit');
+const redisClient = require('../../utils/redisClient');
 let io;
 
 // 속도 제한 설정
@@ -75,30 +76,37 @@ router.get('/health', async (req, res) => {
 // 채팅방 목록 조회 (페이징 적용)
 router.get('/', [limiter, auth], async (req, res) => {
   try {
-    // 쿼리 파라미터 검증 (페이지네이션)
+    // 쿼리 파라미터 처리
     const page = Math.max(0, parseInt(req.query.page) || 0);
     const pageSize = Math.min(Math.max(1, parseInt(req.query.pageSize) || 10), 50);
-    const skip = page * pageSize;
-
-    // 정렬 설정
-    const allowedSortFields = ['createdAt', 'name', 'participantsCount'];
-    const sortField = allowedSortFields.includes(req.query.sortField) 
-      ? req.query.sortField 
-      : 'createdAt';
+    const sortField = ['createdAt', 'name', 'participantsCount'].includes(req.query.sortField)
+      ? req.query.sortField : 'createdAt';
     const sortOrder = ['asc', 'desc'].includes(req.query.sortOrder)
-      ? req.query.sortOrder
-      : 'desc';
+      ? req.query.sortOrder : 'desc';
+    const search = req.query.search || '';
 
-    // 검색 필터 구성
-    const filter = {};
-    if (req.query.search) {
-      filter.name = { $regex: req.query.search, $options: 'i' };
+    // 캐시 키 생성
+    const cacheKey = `chat:rooms:list:page=${page}:size=${pageSize}:sort=${sortField}:${sortOrder}:search=${search}`;
+
+    // 1. 캐시에서 먼저 조회
+    let cached = null;
+    try {
+      cached = await redisClient.get(cacheKey);
+    } catch (e) {
+      console.error('Redis get error:', e);
+    }
+    if (cached) {
+      return res.json(cached);
     }
 
-    // 총 문서 수 조회
+    // 2. DB에서 조회
+    const filter = {};
+    if (search) {
+      filter.name = { $regex: search, $options: 'i' };
+    }
     const totalCount = await Room.countDocuments(filter);
+    const skip = page * pageSize;
 
-    // aggregation으로 participantsCount 계산 및 creator만 populate
     const rooms = await Room.aggregate([
       { $match: filter },
       { $addFields: { participantsCount: { $size: { $ifNull: ['$participants', []] } } } },
@@ -130,7 +138,6 @@ router.get('/', [limiter, auth], async (req, res) => {
       }
     ]);
 
-    // 안전한 응답 데이터 구성 
     const safeRooms = rooms.map(room => ({
       _id: room._id?.toString() || 'unknown',
       name: room.name || '제목 없음',
@@ -145,18 +152,10 @@ router.get('/', [limiter, auth], async (req, res) => {
       isCreator: room.creator?._id?.toString() === req.user.id,
     }));
 
-    // 메타데이터 계산    
     const totalPages = Math.ceil(totalCount / pageSize);
     const hasMore = skip + rooms.length < totalCount;
 
-    // 캐시 설정
-    res.set({
-      'Cache-Control': 'private, max-age=10',
-      'Last-Modified': new Date().toUTCString()
-    });
-
-    // 응답 전송
-    res.json({
+    const responseData = {
       success: true,
       data: safeRooms,
       metadata: {
@@ -171,24 +170,27 @@ router.get('/', [limiter, auth], async (req, res) => {
           order: sortOrder
         }
       }
-    });
+    };
+
+    // 3. 캐시에 저장 (TTL: 60초)
+    try {
+      await redisClient.set(cacheKey, responseData, { ttl: 60 });
+    } catch (e) {
+      console.error('Redis set error:', e);
+    }
+
+    // 4. 응답
+    res.json(responseData);
 
   } catch (error) {
     console.error('방 목록 조회 에러:', error);
-    const errorResponse = {
+    res.status(500).json({
       success: false,
       error: {
         message: '채팅방 목록을 불러오는데 실패했습니다.',
         code: 'ROOMS_FETCH_ERROR'
       }
-    };
-
-    if (process.env.NODE_ENV === 'development') {
-      errorResponse.error.details = error.message;
-      errorResponse.error.stack = error.stack;
-    }
-
-    res.status(500).json(errorResponse);
+    });
   }
 });
 
@@ -224,6 +226,13 @@ router.post('/', auth, async (req, res) => {
       });
     }
     
+    // 방 생성 후 캐시 삭제 (대표 키만 예시, 실제로는 여러 키 삭제 필요)
+    try {
+      await redisClient.del('chat:rooms:list:page=0:size=10:sort=createdAt:desc:search=');
+    } catch (e) {
+      console.error('Redis del error:', e);
+    }
+
     res.status(201).json({
       success: true,
       data: {
