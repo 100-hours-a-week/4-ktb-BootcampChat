@@ -5,7 +5,25 @@ const Room = require('../../models/Room');
 const User = require('../../models/User');
 const { rateLimit } = require('express-rate-limit');
 const redisClient = require('../../utils/redisClient');
+const { promisify } = require('util');
 let io;
+
+// 모든 방 목록 캐시를 패턴 기반으로 삭제하는 함수
+const deleteRoomListCacheByPattern = async (pattern = 'chat:rooms:list:*') => {
+  try {
+    const client = await redisClient.connect();
+    const keys = [];
+    for await (const key of client.scanIterator({ MATCH: pattern })) {
+      keys.push(key);
+    }
+    if (keys.length > 0) {
+      await client.del(keys);
+      console.log(`[Redis] Deleted keys: ${keys.join(', ')}`);
+    }
+  } catch (e) {
+    console.error('Redis pattern delete error:', e);
+  }
+};
 
 // 속도 제한 설정
 const limiter = rateLimit({
@@ -73,113 +91,80 @@ router.get('/health', async (req, res) => {
   }
 });
 
-// 채팅방 목록 조회 (페이징 적용)
+// 방 목록 조회 (zset + 상세 분리 캐시)
 router.get('/', [limiter, auth], async (req, res) => {
   try {
-    // 쿼리 파라미터 처리
     const page = Math.max(0, parseInt(req.query.page) || 0);
     const pageSize = Math.min(Math.max(1, parseInt(req.query.pageSize) || 10), 50);
-    const sortField = ['createdAt', 'name', 'participantsCount'].includes(req.query.sortField)
-      ? req.query.sortField : 'createdAt';
-    const sortOrder = ['asc', 'desc'].includes(req.query.sortOrder)
-      ? req.query.sortOrder : 'desc';
     const search = req.query.search || '';
-
-    // 캐시 키 생성
-    const cacheKey = `chat:rooms:list:page=${page}:size=${pageSize}:sort=${sortField}:${sortOrder}:search=${search}`;
-
-    // 1. 캐시에서 먼저 조회
-    let cached = null;
-    try {
-      cached = await redisClient.get(cacheKey);
-    } catch (e) {
-      console.error('Redis get error:', e);
+    // 정렬/검색이 없을 때만 캐시 사용
+    if (!search) {
+      const start = page * pageSize;
+      const end = start + pageSize - 1;
+      const client = await redisClient.connect();
+      // 최신순으로 방 ID 가져오기 (sendCommand 사용)
+      const roomIds = await client.sendCommand(['ZREVRANGE', 'chat:rooms:ids', String(start), String(end)]);
+      // 상세 정보 병렬 조회
+      let rooms = await Promise.all(roomIds.map(id => client.get(`chat:room:${id}`)));
+      // 캐시에 없는 방은 DB에서 읽고, Redis에 저장
+      for (let i = 0; i < rooms.length; i++) {
+        if (!rooms[i]) {
+          const dbRoom = await Room.findById(roomIds[i])
+            .populate('creator', 'name email')
+            .lean();
+          if (dbRoom) {
+            await client.set(`chat:room:${roomIds[i]}`, JSON.stringify(dbRoom), { EX: 3600 });
+            rooms[i] = JSON.stringify(dbRoom);
+          }
+        }
+      }
+      // 파싱 및 응답 데이터 구성
+      rooms = rooms.map(r => r && typeof r === 'string' ? JSON.parse(r) : r).filter(Boolean);
+      const totalCount = await client.zCard('chat:rooms:ids');
+      const totalPages = Math.ceil(totalCount / pageSize);
+      const hasMore = (start + rooms.length) < totalCount;
+      return res.json({
+        success: true,
+        data: rooms,
+        metadata: {
+          total: totalCount,
+          page,
+          pageSize,
+          totalPages,
+          hasMore,
+          currentCount: rooms.length,
+          sort: { field: 'createdAt', order: 'desc' }
+        }
+      });
     }
-    if (cached) {
-      return res.json(cached);
-    }
-
-    // 2. DB에서 조회
+    // 검색어가 있을 때는 fallback: DB에서 조회
     const filter = {};
     if (search) {
       filter.name = { $regex: search, $options: 'i' };
     }
     const totalCount = await Room.countDocuments(filter);
     const skip = page * pageSize;
-
-    const rooms = await Room.aggregate([
-      { $match: filter },
-      { $sort: { [sortField]: sortOrder === 'desc' ? -1 : 1 } },
-      { $skip: skip },
-      { $limit: pageSize },
-      { $addFields: { participantsCount: { $size: { $ifNull: ['$participants', []] } } } },
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'creator',
-          foreignField: '_id',
-          as: 'creatorInfo'
-        }
-      },
-      { $unwind: { path: '$creatorInfo', preserveNullAndEmptyArrays: true } },
-      {
-        $project: {
-          _id: 1,
-          name: 1,
-          hasPassword: 1,
-          'creator._id': '$creatorInfo._id',
-          'creator.name': '$creatorInfo.name',
-          'creator.email': '$creatorInfo.email',
-          participantsCount: 1,
-          createdAt: 1
-        }
-      }
-    ]);
-
-    const safeRooms = rooms.map(room => ({
-      _id: room._id?.toString() || 'unknown',
-      name: room.name || '제목 없음',
-      hasPassword: !!room.hasPassword,
-      creator: {
-        _id: room.creator?._id?.toString() || 'unknown',
-        name: room.creator?.name || '알 수 없음',
-        email: room.creator?.email || ''
-      },
-      participantsCount: room.participantsCount || 0,
-      createdAt: room.createdAt || new Date(),
-      isCreator: room.creator?._id?.toString() === req.user.id,
-    }));
-
+    const rooms = await Room.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize)
+      .populate('creator', 'name email')
+      .lean();
     const totalPages = Math.ceil(totalCount / pageSize);
     const hasMore = skip + rooms.length < totalCount;
-
-    const responseData = {
+    return res.json({
       success: true,
-      data: safeRooms,
+      data: rooms,
       metadata: {
         total: totalCount,
         page,
         pageSize,
         totalPages,
         hasMore,
-        currentCount: safeRooms.length,
-        sort: {
-          field: sortField,
-          order: sortOrder
-        }
+        currentCount: rooms.length,
+        sort: { field: 'createdAt', order: 'desc' }
       }
-    };
-
-    // 3. 캐시에 저장 (TTL: 60초)
-    try {
-      await redisClient.set(cacheKey, responseData, { ttl: 60 });
-    } catch (e) {
-      console.error('Redis set error:', e);
-    }
-
-    // 4. 응답
-    res.json(responseData);
-
+    });
   } catch (error) {
     console.error('방 목록 조회 에러:', error);
     res.status(500).json({
@@ -192,49 +177,43 @@ router.get('/', [limiter, auth], async (req, res) => {
   }
 });
 
-// 채팅방 생성
+// 채팅방 생성 (zset + 상세 분리 캐시)
 router.post('/', auth, async (req, res) => {
   try {
     const { name, password } = req.body;
-    
     if (!name?.trim()) {
       return res.status(400).json({ 
         success: false,
         message: '방 이름은 필수입니다.' 
       });
     }
-
     const newRoom = new Room({
       name: name.trim(),
       creator: req.user.id,
       participants: [req.user.id],
       password: password
     });
-
     const savedRoom = await newRoom.save();
     const populatedRoom = await Room.findById(savedRoom._id)
       .populate('creator', 'name email')
-      .populate('participants', 'name email');
-    
-    // Socket.IO를 통해 새 채팅방 생성 알림
+      .populate('participants', 'name email')
+      .lean();
+    // Redis에 상세 정보 저장
+    const client = await redisClient.connect();
+    await client.set(`chat:room:${populatedRoom._id}`, JSON.stringify(populatedRoom), { EX: 3600 });
+    // zset에 방 ID 추가 (score: 생성 시간)
+    await client.zAdd('chat:rooms:ids', [{ score: new Date(populatedRoom.createdAt).getTime(), value: String(populatedRoom._id) }]);
+    // Socket.IO 알림
     if (io) {
       io.to('room-list').emit('roomCreated', {
-        ...populatedRoom.toObject(),
+        ...populatedRoom,
         password: undefined
       });
     }
-    
-    // 방 생성 후 캐시 삭제 (대표 키만 예시, 실제로는 여러 키 삭제 필요)
-    try {
-      await redisClient.del('chat:rooms:list:page=0:size=10:sort=createdAt:desc:search=');
-    } catch (e) {
-      console.error('Redis del error:', e);
-    }
-
     res.status(201).json({
       success: true,
       data: {
-        ...populatedRoom.toObject(),
+        ...populatedRoom,
         password: undefined
       }
     });
