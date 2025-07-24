@@ -24,37 +24,35 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq
 
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install npm
-        run: npm install -g pnpm
-
-      - name: Install Dependencies
-        run: npm install
-        working-directory: frontend
-
-
-      - name: Load Secrets from GitHub Secrets
+      - name: Build Docker Image
         run: |
-          echo "NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_ENCRYPTION_KEY=${{ secrets.NEXT_PUBLIC_ENCRYPTION_KEY }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_PASSWORD_SALT=${{ secrets.NEXT_PUBLIC_PASSWORD_SALT }}" >> $GITHUB_ENV
+          docker build -t next-app ./frontend
 
-      - name: Build Project
-        run: npm run build
-        working-directory: frontend
+      - name: Save Docker Image as tarball
+        run: docker save next-app -o next-app.tar
 
-      - name: Deploy to S3
-        run: aws s3 sync ./frontend/.next s3://${{ secrets.S3_BUCKET_NAME }} --delete
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Copy Docker Image to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "next-app.tar"
+          target: "~/next-app.tar"
 
-      # - name: Invalidate CloudFront
-      #   run: aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }} --paths "/*"
-      #   env:
-      #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Load and Run Docker Container on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker stop next-app || true
+            docker rm next-app || true
+            docker load -i ~/next-app.tar
+            docker run -d --name next-app -p 3000:3000 next-app
