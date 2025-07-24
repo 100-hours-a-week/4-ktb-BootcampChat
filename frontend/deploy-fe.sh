@@ -5,9 +5,14 @@ IMAGE_NAME="4moa/right-fe"
 PLATFORM="linux/amd64"
 TAG="latest"
 
+NEXT_PUBLIC_API_URL="https://api.goorm-ktb-004.goorm.team"
+
 # 빌드
 echo "📦 Building frontend Docker image..."
-docker build --platform $PLATFORM -t $IMAGE_NAME:$TAG .
+docker build \
+  --platform $PLATFORM \
+  --build-arg NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+  -t $IMAGE_NAME:$TAG .
 
 # 푸시
 echo "🚀 Pushing frontend image to Docker Hub..."
