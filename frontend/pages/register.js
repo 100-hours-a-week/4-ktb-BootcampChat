@@ -129,17 +129,19 @@ const Register = () => {
         router.push('/chat-rooms');
       }, 10000);
 
-    } catch (err) {
-      console.error('Registration error:', err);
-      
-      if (err.response?.data?.errors) {
-        setErrors(err.response.data.errors);
-      } else if (err.response?.data?.message) {
-        setErrors([{ message: err.response.data.message }]);
-      } else {
-        setErrors([{ message: '회원가입 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }]);
-      }
-    } finally {
+      } catch (err) {
+        console.error('Registration error:', err);
+        
+        if (err.response?.data?.errors) {
+          setErrors(err.response.data.errors);
+        } else if (err.response?.data?.message) {
+          setErrors([{ message: err.response.data.message }]);
+        } else if (err.message) {
+          setErrors([{ message: err.message}])
+        } else {
+          setErrors([{ message: '회원가입 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' }]);
+        }
+      } finally {
       setLoading(false);
     }
   };
