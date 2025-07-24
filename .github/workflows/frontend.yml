@@ -29,11 +29,11 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install pnpm
+      - name: Install npm
         run: npm install -g pnpm
 
       - name: Install Dependencies
-        run: pnpm install
+        run: npm install
         working-directory: frontend
 
 
@@ -44,7 +44,7 @@ jobs:
           echo "NEXT_PUBLIC_PASSWORD_SALT=${{ secrets.NEXT_PUBLIC_PASSWORD_SALT }}" >> $GITHUB_ENV
 
       - name: Build Project
-        run: pnpm build
+        run: npm run build
         working-directory: frontend
 
       - name: Deploy to S3
