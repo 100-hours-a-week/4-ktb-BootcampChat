@@ -109,10 +109,10 @@ router.get('/', [limiter, auth], async (req, res) => {
 
     const rooms = await Room.aggregate([
       { $match: filter },
-      { $addFields: { participantsCount: { $size: { $ifNull: ['$participants', []] } } } },
       { $sort: { [sortField]: sortOrder === 'desc' ? -1 : 1 } },
       { $skip: skip },
       { $limit: pageSize },
+      { $addFields: { participantsCount: { $size: { $ifNull: ['$participants', []] } } } },
       {
         $lookup: {
           from: 'users',
@@ -127,11 +127,9 @@ router.get('/', [limiter, auth], async (req, res) => {
           _id: 1,
           name: 1,
           hasPassword: 1,
-          creator: {
-            _id: '$creatorInfo._id',
-            name: '$creatorInfo.name',
-            email: '$creatorInfo.email'
-          },
+          'creator._id': '$creatorInfo._id',
+          'creator.name': '$creatorInfo.name',
+          'creator.email': '$creatorInfo.email',
           participantsCount: 1,
           createdAt: 1
         }
