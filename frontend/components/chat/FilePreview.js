@@ -5,8 +5,8 @@ import {
   ImageIcon, 
   PdfIcon as FileText, 
   MovieIcon as Film, 
-  LoadingOutlineIcon as Loader,
-  MusicIcon as Music,
+  ReloadOutlineIcon as ReloadOutlineIcon,
+  SoundOnIcon as SoundOnIcon,
   FileIcon as File
 } from '@vapor-ui/icons';
 import { Button, IconButton, Callout } from '@vapor-ui/core';
@@ -194,7 +194,7 @@ const FilePreview = ({
     } else if (file.type.startsWith('video/')) {
       return <Film {...iconProps} color="#2196F3" />;
     } else if (file.type.startsWith('audio/')) {
-      return <Music {...iconProps} color="#9C27B0" />;
+      return <SoundOnIcon {...iconProps} color="#9C27B0" />;
     } else if (file.type === 'application/pdf') {
       return <FileText {...iconProps} color="#F44336" />;
     } else {
@@ -302,7 +302,7 @@ const FilePreview = ({
     if (uploading) {
       return (
         <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
-          <Loader className="w-4 h-4 animate-spin" aria-hidden="true" />
+          <ReloadOutlineIcon className="w-4 h-4 animate-spin" aria-hidden="true" />
           <span>{uploadProgress}% 업로드 중...</span>
         </div>
       );
