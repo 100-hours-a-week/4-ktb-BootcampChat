@@ -9,7 +9,7 @@ on:
 
     paths:
       - 'frontend/**'
-      - '.github/workflows/deploy.yml'
+      - '.github/workflows/frontend.yml'
 
 jobs:
   deploy:
