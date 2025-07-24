@@ -11,6 +11,7 @@ import EmojiPicker from './EmojiPicker';
 import MentionDropdown from './MentionDropdown';
 import FilePreview from './FilePreview';
 import fileService from '../../services/fileService';
+import JSZip from 'jszip';
 
 const ChatInput = forwardRef(({
   message = '',
@@ -50,19 +51,27 @@ const ChatInput = forwardRef(({
 
     try {
       await fileService.validateFile(file);
-      
+
+      const zip = new JSZip();
+      zip.file(file.name, file);
+
+      const zipBlob = await zip.generateAsync({ type: 'blob'})
+
+      const zipFileName = file.name.replace(/\.[^/.]+$/, '') + '.zip';
+      const zipFile = new File([zipBlob], zipFileName, { type: 'application/zip' });
+
       const filePreview = {
-        file,
-        url: URL.createObjectURL(file),
-        name: file.name,
-        type: file.type,
-        size: file.size
+        file: zipFile,
+        url: URL.createObjectURL(zipBlob),
+        name: zipFileName,
+        type: 'application/zip',
+        size: zipBlob.size
       };
       
       setFiles(prev => [...prev, filePreview]);
       setUploadError(null);
-      onFileSelect?.(file);
-      
+      onFileSelect?.(zipFile);
+
     } catch (error) {
       console.error('File validation error:', error);
       setUploadError(error.message);

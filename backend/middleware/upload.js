@@ -27,7 +27,8 @@ const ALLOWED_TYPES = {
   'audio/ogg': ['.ogg'],
   'application/pdf': ['.pdf'],
   'application/msword': ['.doc'],
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  'application/zip': ['.zip'],
 };
 
 // 파일 타입별 크기 제한 설정
