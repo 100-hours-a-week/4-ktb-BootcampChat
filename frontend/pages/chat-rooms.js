@@ -9,7 +9,7 @@ import socketService from '../services/socket';
 import authService from '../services/authService';
 import axiosInstance from '../services/axios';
 import { withAuth } from '../middleware/withAuth';
-import { Toast } from '../components/Toast';
+import ToastContainer$, { Toast } from '../components/Toast';
 import { Modal, ModalFooter, ModalBody, ModalHeader } from '../components/ui/Modal';
 
 
@@ -599,17 +599,16 @@ function ChatRoomsComponent() {
       console.error('Room join error:', error);
       
       let errorMessage = '입장에 실패했습니다.';
-      if (error.response?.status === 404) {
+      if (error.status === 404) {
         errorMessage = '채팅방을 찾을 수 없습니다.';
-      } else if (error.response?.status === 403) {
-        errorMessage = '채팅방 입장 권한이 없습니다.';
+      } else if (error.status === 403) {
+        errorMessage = '비밀번호가 틀렸습니다.';
       }
       
-      setError({
-        title: '채팅방 입장 실패',
-        message: error.response?.data?.message || errorMessage,
-        type: 'danger'
-      });
+      setShowPasswordModal(false);
+      setCurrentRoomId(null);
+      setPassword('');
+      Toast.error(errorMessage);
     } finally {
       setJoiningRoom(false);
     }
@@ -684,6 +683,7 @@ function ChatRoomsComponent() {
 
   return (
     <div className="auth-container">
+      <ToastContainer$ />
       <Modal
         isOpen={showPasswordModal}
         onClose={() => closePasswordModal()}
@@ -709,7 +709,7 @@ function ChatRoomsComponent() {
           </TextInput.Root>
         </ModalBody>
         <ModalFooter>
-          <Button type='button' variant="ghost" onClick={closePasswordModal}>
+          <Button type="button" variant="ghost" onClick={closePasswordModal}>
             닫기
           </Button>
           <Button
