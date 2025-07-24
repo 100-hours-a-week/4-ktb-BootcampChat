@@ -66,25 +66,7 @@ module.exports = function(io) {
       );
 
       // 읽음 상태 비동기 업데이트
-      if (sortedMessages.length > 0 && socket.user) {
-        const messageIds = sortedMessages.map(msg => msg._id);
-        Message.updateMany(
-          {
-            _id: { $in: messageIds },
-            'readers.userId': { $ne: socket.user.id }
-          },
-          {
-            $push: {
-              readers: {
-                userId: socket.user.id,
-                readAt: new Date()
-              }
-            }
-          }
-        ).exec().catch(error => {
-          console.error('Read status update error:', error);
-        });
-      }
+      // (기존 readers 배열에 $push 하던 코드 삭제)
 
       return {
         messages: sortedMessages,
@@ -375,6 +357,17 @@ module.exports = function(io) {
         socket.emit('messageLoadStart');
 
         const result = await loadMessagesWithRetry(socket, roomId, before);
+        
+        // 읽음 처리: 마지막 메시지 timestamp로 Room의 lastReadAtPerUser 갱신
+        if (result.messages.length > 0 && socket.user) {
+          const lastTimestamp = result.messages[result.messages.length - 1].timestamp;
+          if (lastTimestamp) {
+            await Room.findByIdAndUpdate(
+              roomId,
+              { $set: { [`lastReadAtPerUser.${socket.user.id}`]: lastTimestamp } }
+            );
+          }
+        }
         
         logDebug('previous messages loaded', {
           roomId,

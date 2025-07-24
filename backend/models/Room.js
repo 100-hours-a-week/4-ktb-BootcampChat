@@ -27,7 +27,13 @@ const RoomSchema = new mongoose.Schema({
   participants: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  }]
+  }],
+  // 각 유저별 마지막 읽은 시각 (read cursor)
+  lastReadAtPerUser: {
+    type: Map,
+    of: Date,
+    default: new Map()
+  }
 });
 
 // 비밀번호 해싱 미들웨어

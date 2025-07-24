@@ -48,18 +48,6 @@ const MessageSchema = new mongoose.Schema({
     default: Date.now,
     index: true 
   },
-  readers: [{
-    userId: { 
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    readAt: { 
-      type: Date,
-      default: Date.now,
-      required: true
-    }
-  }],
   reactions: {
     type: Map,
     of: [{
@@ -93,46 +81,10 @@ const MessageSchema = new mongoose.Schema({
 // 복합 인덱스 설정
 MessageSchema.index({ room: 1, timestamp: -1 });
 MessageSchema.index({ room: 1, isDeleted: 1 });
-MessageSchema.index({ 'readers.userId': 1 });
 MessageSchema.index({ sender: 1 });
 MessageSchema.index({ type: 1 });
 MessageSchema.index({ timestamp: -1 });
-MessageSchema.index({ 'reactions.userId': 1 });
-
-// 읽음 처리 Static 메소드 개선
-MessageSchema.statics.markAsRead = async function(messageIds, userId) {
-  if (!messageIds?.length || !userId) return;
-
-  const bulkOps = messageIds.map(messageId => ({
-    updateOne: {
-      filter: {
-        _id: messageId,
-        isDeleted: false,
-        'readers.userId': { $ne: userId }
-      },
-      update: {
-        $push: {
-          readers: {
-            userId: new mongoose.Types.ObjectId(userId),
-            readAt: new Date()
-          }
-        }
-      }
-    }
-  }));
-
-  try {
-    const result = await this.bulkWrite(bulkOps, { ordered: false });
-    return result.modifiedCount;
-  } catch (error) {
-    console.error('Mark as read error:', {
-      error,
-      messageIds,
-      userId
-    });
-    throw error;
-  }
-};
+// reactions.userId 인덱스는 reactions 구조에 따라 유지/삭제 판단
 
 // 리액션 처리 메소드 개선
 MessageSchema.methods.addReaction = async function(emoji, userId) {
