@@ -17,7 +17,9 @@ test.describe('인증 테스트', () => {
     await expect(page.locator('.chat-rooms-card')).toBeVisible({ timeout: 30000 });
 
     // 채팅방 목록 헤더 텍스트 확인 (Card.Title 사용)
-    await expect(page.locator('h5')).toHaveText('채팅방 목록');
+    await expect(
+      page.locator('span').filter({ hasText: '채팅방 목록' })
+    ).toBeVisible();
     
     // 연결 상태 확인
     await expect(page.locator('.text-success')).toBeVisible();
