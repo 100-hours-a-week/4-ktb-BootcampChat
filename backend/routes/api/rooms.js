@@ -98,41 +98,52 @@ router.get('/', [limiter, auth], async (req, res) => {
     // 총 문서 수 조회
     const totalCount = await Room.countDocuments(filter);
 
-    // 채팅방 목록 조회 with 페이지네이션
-    const rooms = await Room.find(filter)
-      .populate('creator', 'name email')
-      .populate('participants', 'name email')
-      .sort({ [sortField]: sortOrder === 'desc' ? -1 : 1 })
-      .skip(skip)
-      .limit(pageSize)
-      .lean();
+    // aggregation으로 participantsCount 계산 및 creator만 populate
+    const rooms = await Room.aggregate([
+      { $match: filter },
+      { $addFields: { participantsCount: { $size: { $ifNull: ['$participants', []] } } } },
+      { $sort: { [sortField]: sortOrder === 'desc' ? -1 : 1 } },
+      { $skip: skip },
+      { $limit: pageSize },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'creator',
+          foreignField: '_id',
+          as: 'creatorInfo'
+        }
+      },
+      { $unwind: { path: '$creatorInfo', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          hasPassword: 1,
+          creator: {
+            _id: '$creatorInfo._id',
+            name: '$creatorInfo.name',
+            email: '$creatorInfo.email'
+          },
+          participantsCount: 1,
+          createdAt: 1
+        }
+      }
+    ]);
 
     // 안전한 응답 데이터 구성 
-    const safeRooms = rooms.map(room => {
-      if (!room) return null;
-
-      const creator = room.creator || { _id: 'unknown', name: '알 수 없음', email: '' };
-      const participants = Array.isArray(room.participants) ? room.participants : [];
-
-      return {
-        _id: room._id?.toString() || 'unknown',
-        name: room.name || '제목 없음',
-        hasPassword: !!room.hasPassword,
-        creator: {
-          _id: creator._id?.toString() || 'unknown',
-          name: creator.name || '알 수 없음',
-          email: creator.email || ''
-        },
-        participants: participants.filter(p => p && p._id).map(p => ({
-          _id: p._id.toString(),
-          name: p.name || '알 수 없음',
-          email: p.email || ''
-        })),
-        participantsCount: participants.length,
-        createdAt: room.createdAt || new Date(),
-        isCreator: creator._id?.toString() === req.user.id,
-      };
-    }).filter(room => room !== null);
+    const safeRooms = rooms.map(room => ({
+      _id: room._id?.toString() || 'unknown',
+      name: room.name || '제목 없음',
+      hasPassword: !!room.hasPassword,
+      creator: {
+        _id: room.creator?._id?.toString() || 'unknown',
+        name: room.creator?.name || '알 수 없음',
+        email: room.creator?.email || ''
+      },
+      participantsCount: room.participantsCount || 0,
+      createdAt: room.createdAt || new Date(),
+      isCreator: room.creator?._id?.toString() === req.user.id,
+    }));
 
     // 메타데이터 계산    
     const totalPages = Math.ceil(totalCount / pageSize);
