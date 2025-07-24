@@ -56,4 +56,8 @@ RoomSchema.methods.checkPassword = async function(password) {
   return await bcrypt.compare(password, room.password);
 };
 
+RoomSchema.index({ createdAt: -1 });
+RoomSchema.index({ name: 1 });
+RoomSchema.index({ participants: 1 });
+
 module.exports = mongoose.model('Room', RoomSchema);
