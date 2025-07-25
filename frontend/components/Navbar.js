@@ -41,7 +41,11 @@ const Navbar = () => {
   }, []);
 
   const handleNavigation = (path) => {
-    router.push(path);
+    if (router.pathname === path) {
+      router.reload();
+    } else {
+      router.push(path);
+    }
   };
 
   const handleLogout = async () => {
