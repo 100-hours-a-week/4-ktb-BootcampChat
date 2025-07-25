@@ -4,6 +4,7 @@ import Image from "next/image";
 import { Button, Avatar, Text } from "@vapor-ui/core";
 import { Flex, HStack, Box, Container } from "./ui/Layout";
 import authService from "../services/authService";
+import PersistentAvatar from './common/PersistentAvatar';
 
 const Navbar = () => {
   const [currentUser, setCurrentUser] = useState(null);
@@ -110,7 +111,12 @@ const Navbar = () => {
             {currentUser ? (
               <HStack gap="150" align="center">
                 {/* Profile Image */}
-                <Avatar.Root
+                <PersistentAvatar
+                  size="md"
+                  style={{ flexShrink: 0 }}
+                  user={currentUser}
+                />
+                {/* <Avatar.Root
                   size="md"
                   style={{ flexShrink: 0 }}
                   src={
@@ -123,7 +129,7 @@ const Navbar = () => {
                   <Avatar.Fallback>
                     {currentUser.name?.[0]?.toUpperCase()}
                   </Avatar.Fallback>
-                </Avatar.Root>
+                </Avatar.Root> */}
 
                 {/* Member Name */}
                 <Text typography="body2" style={{ fontWeight: 500 }}>
