@@ -10,7 +10,6 @@ const routes = require('./routes');
 
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 5000;
 
 // trust proxy 설정 추가
 app.set('trust proxy', 1);
@@ -52,7 +51,7 @@ app.use(express.urlencoded({ extended: true }));
 app.options('*', cors(corsOptions));
 
 // 정적 파일 제공
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static('/app/uploads'));
 
 // 요청 로깅
 if (process.env.NODE_ENV === 'development') {
@@ -75,7 +74,26 @@ app.get('/health', (req, res) => {
 app.use('/api', routes);
 
 // Socket.IO 설정
-const io = socketIO(server, { cors: corsOptions });
+const io = socketIO(server, {
+  cors: {
+    origin: process.env.CORS_ORIGIN || '*',
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// --- Socket.IO Redis 어댑터 적용 (Pub/Sub용 Redis) ---
+const { createAdapter } = require('@socket.io/redis-adapter');
+const { createClient } = require('redis');
+
+const pubClient = createClient({ url: process.env.REDIS_PUBSUB_URL });
+const subClient = pubClient.duplicate();
+
+Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
+  io.adapter(createAdapter(pubClient, subClient));
+});
+// ---------------------------------------------------
+
 require('./sockets/chat')(io);
 
 // Socket.IO 객체 전달
